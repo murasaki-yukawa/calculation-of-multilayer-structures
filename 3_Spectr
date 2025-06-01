@@ -1,0 +1,125 @@
+import numpy as np
+from functools import reduce
+import matplotlib.pyplot as plt
+
+from materials import Material, materials_dict
+import TMM
+import to_excel
+
+# TMM - EH - Find spectrum R, T
+
+
+c = 299792458
+hv = 0.8 * 1.602176634e-19  # Дж
+qe = 1.602176634e-19
+me0 = 9.10938370153e-31
+e0 = 8.8541878128e-12
+
+λ = 1.55e-6
+
+I1 = 17e9  # Вт/м^2                        "1"
+alpha = 1 / 40
+I0 = I1 * alpha  # 0.425  ГВт/м^2          "0"
+
+
+
+U = 'Ge'
+
+material = materials_dict[U]
+n_ = material.n
+a = material.a
+me = material.me
+
+
+print(f'{c} м/с - скорость света')
+print(f'{hv} Дж - энергия фотона')
+print(f'{qe} Кл - заряд электрона')
+print(f'{me0} кг - эффективная масса электрона')
+print(f'{e0} Ф*м-1 - электрическая постоянная')
+print(f'{λ} м - длина волны излучения лазера')
+print(f'{I1} Вт/м^2 - плотность мощности "1"')
+print(f'{I0} Вт/м^2 - плотность мощности "0"')
+
+print(U)
+print(f'{a} м-1 - показатель поглощения')
+print(f'{n_} - коэффициент преломления')
+print(f'{me} кг - эффективная масса электрона')
+
+print('')
+print('Система СИ')
+
+print('Константы: +')
+print('')
+
+
+
+# ----------------------------------------------------------------------------
+
+n_si = 3.48
+n_sio2 = 1.44
+
+n = np.array([n_si, n_sio2, n_si, n_sio2, n_])
+
+N = len(n)  # кол-во слоёв
+
+hz = np.array([TMM.find_L(λ, n[i+1]) for i in range(N-2)])
+# hz[1] = 0.116262 * λ	# R = 0.76
+# hz[1] = 0.128210 * λ	# R = 0.52
+
+
+wavelengths = np.linspace(0.5e-6, 2.5e-6, 10000)
+
+R = np.zeros_like(wavelengths)
+T = np.zeros_like(wavelengths)
+
+
+for i, wavelength in enumerate(wavelengths):
+	
+	k = 2 * np.pi / wavelength
+	
+	D = np.zeros((N-2, 2, 2), dtype=complex)
+	# F = np.eye(2, dtype=complex)
+	for j in range(N-2):
+		# D[j] = D_(k, n[j+1], hz[j])
+		# F = np.matmul(D, F)
+		# or
+		D[j] = TMM.D_trig_(k, n[j+1], hz[j])
+
+	F = reduce(np.matmul, [D[i] for i in range(N-3, -1, -1)])
+	
+	r_, t_ = TMM.find_rt(F, n)
+	
+	R[i] = np.abs(r_) ** 2
+	T[i] = n[-1] / n[0] * np.abs(t_) ** 2
+	
+# R_max = np.max(R)
+# print(f"Максимальное значение R: {R_max:.4f}")
+# Максимальное значение R: 0.8893
+
+idx = np.argmin(np.abs(wavelengths - λ))
+R_λ = R[idx]
+print(f'R_λ = {R_λ:.4f}')
+
+
+
+plt.figure()
+plt.plot(wavelengths * 1e6, R, label="Отражение (R)")
+plt.plot(wavelengths * 1e6, T, label="Пропускание (T)")
+plt.axvline(λ * 1e6, color='k', linestyle='--', label="1.55 мкм")
+plt.xlabel("Длина волны (мкм)")
+# plt.ylabel("Коэффициент")
+plt.legend()
+plt.grid()
+
+plt.tight_layout()
+plt.show()
+
+
+to_excel.out_to_xl_(
+    x_values=wavelengths * 1e6,
+    x_name="Длина волны, мкм",
+    y_values=R,
+    y_name="Отражение",
+    name_file=f"Отражение 0.91 ",
+    sheet_title=f"R 0.91"
+)
