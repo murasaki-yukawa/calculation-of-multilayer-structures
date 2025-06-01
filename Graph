@@ -1,0 +1,51 @@
+import matplotlib.pyplot as plt
+import numpy as np
+
+
+
+def Field_z_(z_all, It, edge, N_nl):
+	plt.figure()
+	plt.plot(z_all * 1e6, It, color='k', linewidth=1.5)
+	
+	for b in range(len(edge) - 1):
+		if b == N_nl - 1 or b == N_nl:
+			plt.axvline(edge[b] * 1e6, color='red', linestyle='--', linewidth=1.5)
+		else:
+			plt.axvline(edge[b] * 1e6, color='gray', linestyle='--', linewidth=1.5)
+	
+	plt.ylim(0, np.max(It) + 0.5)
+	plt.xlabel("Длина, мкм")
+	plt.ylabel("|E|²")
+	plt.grid(linewidth=0.4)
+	
+	plt.tight_layout()
+	plt.show()
+	
+def Impulse_(t_i, I, I_tau):
+	plt.figure()
+	plt.plot(t_i * 1e9, I * 1e-9, color='r', linestyle='--', linewidth=1.5)
+	plt.plot(t_i * 1e9, I_tau * 1e-9, color='k', linewidth=1.5)
+	plt.xlabel("Время, нс")
+	plt.ylabel("Интенсивность, ГВт/м²")
+	plt.grid(linewidth=0.4)
+	
+	plt.tight_layout()
+	plt.show()
+
+def change_n_in_(z_nl, n_in, n_,):
+	plt.figure()
+	plt.axhline(n_, color='k', linestyle='--', linewidth=1.5)
+	plt.plot(z_nl * 1e6, n_in, color='k', linewidth=1.5)
+	# plt.title("")
+	plt.xlabel("Длина, мкм")
+	plt.ylabel("n")
+	plt.grid(linewidth=0.4)
+	
+	plt.tight_layout()
+	plt.show()
+
+
+	
+		
+		
+		
