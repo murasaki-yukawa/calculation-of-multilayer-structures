@@ -1,0 +1,268 @@
+import numpy as np
+from functools import reduce
+import matplotlib.pyplot as plt
+import time
+
+from materials import materials_dict
+import TMM
+import to_excel
+
+# TMM - EH - Field at point with absorption in central layer
+
+
+
+start_time = time.time()
+
+c = 299792458
+hv = 0.8 * 1.602176634e-19  # Дж
+qe = 1.602176634e-19
+me0 = 9.10938370153e-31
+e0 = 8.8541878128e-12
+
+λ = 1.55e-6
+k = 2 * np.pi / λ
+
+I1 = 17e9  # Вт/м^2                        "1"
+alpha = 1 / 40
+I0 = I1 * alpha  # 0.425  ГВт/м^2          "0"
+
+
+
+
+U = 'Ge'
+
+material = materials_dict[U]
+n_ = material.n
+a = material.a
+me = material.me
+
+
+
+print(f'{c} м/с - скорость света')
+print(f'{hv} Дж - энергия фотона')
+print(f'{qe} Кл - заряд электрона')
+print(f'{me0} кг - эффективная масса электрона')
+print(f'{e0} Ф*м-1 - электрическая постоянная')
+print(f'{λ} м - длина волны излучения лазера')
+print(f'{I1} Вт/м^2 - плотность мощности "1"')
+print(f'{I0} Вт/м^2 - плотность мощности "0"')
+
+print(U)
+print(f'{a} м-1 - показатель поглощения')
+print(f'{n_} - коэффициент преломления')
+print(f'{me} кг - эффективная масса электрона')
+
+print('')
+print('Система СИ')
+
+print('Константы: +')
+print('')
+
+
+
+
+# ----------------------------------------------------------- Задание структуры
+
+n_si = 3.48
+n_sio2 = 1.44
+
+
+# n = np.array([n_si, n_sio2, n_si, n_sio2, n_, n_sio2, n_si, n_sio2, n_si], dtype=np.float32)
+# N_nl = 4
+
+n = np.array([n_si, n_sio2, n_si, n_sio2, n_si, n_, n_si, n_sio2, n_si, n_sio2, n_si], dtype=np.float32)
+N_nl = 5
+
+N = len(n)  # кол-во слоёв
+
+# hz = np.array([find_L(λ, n[i+1]) for i in range(N-2)])
+hz = np.zeros(N-2)
+
+# ---------------------------- 3 mirror
+# hz[0] = 0.173611 * λ
+#
+# # hz[1] = 0.115362 * λ		# R = 0.77
+# hz[1] = 0.116262 * λ		# R = 0.76
+# # hz[1] = 0.116341 * λ		# R = 0.759
+# # hz[1] = 0.128210 * λ		# R = 0.524
+# hz[2] = 0.173611 * λ
+#
+#
+# hz[3] = 0.103660 * λ		# T - max R=0.76
+# # hz[3] = 0.137255 * λ		# R = 0.759
+# # # hz[3] = 0.294118 * λ		# R = 0.524
+#
+# hz[4] = 0.173611 * λ
+# hz[5] = 0.116262 * λ		# R = 0.76
+# # hz[5] = 0.116341 * λ		# R = 0.759
+# # hz[5] = 0.128210 * λ		# R = 0.524
+# hz[6] = 0.173611 * λ
+
+
+# ---------------------------- 4 mirror
+hz[0] = 0.173611 * λ
+# hz[1] = 0.107061 * λ		# R = 0.77
+hz[1] = 0.108361 * λ		# R = 0.76
+hz[2] = 0.173611 * λ
+hz[3] = 0.071839 * λ
+
+
+hz[4] = 0.102610 * λ		# T - max R=0.76
+# hz[4] = 0.103390 * λ
+# hz[3] = 0.137255 * λ		# R = 0.759
+# hz[3] = 0.294118 * λ		# R = 0.524
+
+hz[5] = 0.071839 * λ
+hz[6] = 0.173611 * λ
+# hz[7] = 0.107061 * λ		# R = 0.77
+hz[7] = 0.108361 * λ		# R = 0.76
+hz[8] = 0.173611 * λ
+
+
+
+# ----------------------------------------------------------- Поиск R и T для структуры
+
+F = TMM.find_F_(hz, k, n, a, N_nl)
+
+r, t = TMM.find_rt(F, n)
+R = np.abs(r) ** 2
+T = n[-1] / n[0] * np.abs(t) ** 2
+
+print(f'|r|={np.abs(r):.4f}')
+print(f'|t|={np.abs(t):.4f}')
+print(f'R={R:.4f}')
+print(f'T={T:.4f}')
+
+
+print(f'check {R+T:.4f}')
+
+# ----------------------------------------------------------- Проверка
+TMM.check_F_(F, r, n)
+
+# ----------------------------------------------------------- Распределение поля
+
+z_0 = 0.2 * λ
+z_1 = np.sum(hz[:N_nl-1])
+z_i = np.arange(-z_0, z_1, 0.0001 * λ)
+
+z_2 = np.sum(hz[:N_nl])
+z_3 = np.sum(hz) + z_0
+z_j = np.arange(z_2, z_3, 0.0001 * λ)
+
+h_nl = 0.000001 * λ
+z_nl = np.arange(z_1, z_2, h_nl)
+
+
+
+edge = [np.sum(hz[:Ni]) for Ni in range(N-1)]
+edge = edge + [z_3]
+
+z_shift = [0] + edge
+
+# ----------------------------------------------------------- через поля
+
+E0 = 1 + r
+H0 = n[0] * (1 - r)
+	
+EH = np.full(N, None, dtype=object)
+	
+EH[0] = np.array([E0, H0])
+EH[1] = EH[0]
+	
+
+# E_z_l = np.zeros_like(z_i, dtype=np.complex128)
+# E_z_nl = np.zeros_like(z_nl, dtype=np.complex128)
+# E_z_r = np.zeros_like(z_j, dtype=np.complex128)
+
+
+# ------------------------------ падающее + отражённое поле и левое зеркало
+E_z_l = TMM.Field_l_mirror_(k, n, hz, z_i, edge, z_shift, EH, 1, N_nl)
+
+# for	i in range(1, N_nl):
+# 	EH[i+1] = TMM.D_trig_(k, n[i], hz[i-1]) @ EH[i]
+# # можем только первое зеркало просчитать заранее
+# # 	в нелинейном слое поле на выходе заранее неизвестно
+#
+# for i, z in enumerate(z_i):
+# 	for j in range(N_nl):
+# 		if z <= edge[j]:
+# 			E_z_l[i] = (TMM.D_trig_(k, n[j], z - z_shift[j]) @ EH[j])[0]
+# 			break
+
+	
+# ------------------------------ нелинейный слой
+E_z_nl = TMM.Field_nl_(k, n, a, z_nl, N_nl, EH, h_nl)
+
+# n_in = np.full(len(z_nl), n[N_nl], dtype=object)
+#
+# EH_nl = np.zeros((len(n_in) + 1, 2), dtype=complex)
+# EH_nl[0] = EH[N_nl]
+#
+#
+# for i, z in enumerate(z_nl):
+# 	EH_nl[i+1] = TMM.D_trig_absorb_(k, a, n_in[i], h_nl) @ EH_nl[i]
+# 	# EH_nl[i + 1] = D_trig_(k, n_in[i], h_nl) @ EH_nl[i]	# без поглощения
+# 	E_z_nl[i] = EH_nl[i][0]
+#
+# EH[N_nl+1] = EH_nl[-1]
+
+	
+# ------------------------------ правое зеркало и прошедшее поле
+E_z_r = TMM.Field_r_mirror_(k, n, hz, z_j, edge, z_shift, EH, N_nl+1, N-1)
+
+# for j in range(N_nl + 1, N-1):
+# 	EH[j+1] = TMM.D_trig_(k, n[j], hz[j-1]) @ EH[j]
+#
+# for i, z in enumerate(z_j):
+# 	for j in range(N_nl+1, N):
+# 		if z <= edge[j]:
+# 			E_z_r[i] = (TMM.D_trig_(k, n[j], z - z_shift[j]) @ EH[j])[0]
+# 			break
+		
+
+# ----------------------------------------------------------- график
+
+E_z = np.concatenate([E_z_l, E_z_nl, E_z_r])
+z_all = np.concatenate([z_i, z_nl, z_j])
+I = np.abs(E_z) ** 2
+
+
+print(f'I[-1]={n[-1] / n[0] * I[-1]:.4f}') 	# check,	if = T => fine
+print(f'1/40 = {1/40:.4f}')
+print(f'1/T = {1/T:.4f}')
+
+plt.figure()
+plt.plot(z_all * 1e6, I, color='k', linewidth=1.5)
+
+
+for b in range(len(edge)-1):
+	if b == N_nl-1 or b == N_nl:
+		plt.axvline(edge[b] * 1e6, color='red', linestyle='--', linewidth=1.5)
+	else:
+		plt.axvline(edge[b] * 1e6, color='gray', linestyle='--', linewidth=1.5)
+
+# plt.ylim(0, 1)
+# plt.xlim(0.7, 1.95)
+
+plt.xlabel("Длина, мкм")
+plt.ylabel("|E|²")
+plt.grid(linewidth=0.4)
+
+plt.tight_layout()
+plt.show()
+
+to_excel.out_to_xl_(
+    x_values=z_all * 1e6,
+    x_name="Длина, мкм",
+    y_values=I,
+    y_name="|E|²",
+    name_file=f"Поле 0.76 4mirror ",
+    sheet_title=f"T-max 4m"
+)
+
+print(f"-------------------")
+end_time = time.time()
+time_ = end_time - start_time
+print(f"time_ = {time_:.6f} сек")
+
+
