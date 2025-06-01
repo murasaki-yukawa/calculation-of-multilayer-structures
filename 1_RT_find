@@ -1,0 +1,91 @@
+import numpy as np
+from functools import reduce
+
+from materials import Material, materials_dict
+import TMM
+
+
+# TMM - EH - Find R, T or r, t coefficient
+
+
+c = 299792458
+hv = 0.8 * 1.602176634e-19  # Дж
+qe = 1.602176634e-19
+me0 = 9.10938370153e-31
+e0 = 8.8541878128e-12
+
+λ = 1.55e-6
+k = 2 * np.pi / λ
+
+
+I1 = 17e9  # Вт/м^2						"1"
+K = 1 / 4
+I0 = I1 * K  # 0.425  ГВт/м^2			"0"
+
+
+
+U = 'Ge'
+
+material = materials_dict[U]
+n_ = material.n
+a = material.a
+me = material.me
+
+
+print(f'{c} м/с - скорость света')
+print(f'{hv} Дж - энергия фотона')
+print(f'{qe} Кл - заряд электрона')
+print(f'{me0} кг - эффективная масса электрона')
+print(f'{e0} Ф*м-1 - электрическая постоянная')
+print(f'{λ} м - длина волны излучения лазера')
+print(f'{I1} Вт/м^2 - плотность мощности "1"')
+print(f'{I0} Вт/м^2 - плотность мощности "0"')
+
+print(U)
+print(f'{a} м-1 - показатель поглощения')
+print(f'{n_} - коэффициент преломления')
+print(f'{me} кг - эффективная масса электрона')
+
+print('')
+print('Система СИ')
+
+print('Константы: +')
+print('')
+
+
+
+# ----------------------------------------------------------------------------
+
+n_si = 3.48
+n_sio2 = 1.44
+
+n = np.array([n_si, n_sio2, n_si, n_sio2, n_])
+
+
+N = len(n)  # кол-во слоёв
+
+# hz = np.array([find_L(λ, n[i+1]) for i in range(N-2)])
+hz = np.zeros(N-2)
+hz[0] = 0.173611 * λ
+hz[1] = 0.116341 * λ		# R = 0.759
+# hz[1] = 0.128210 * λ		# R = 0.524
+hz[2] = 0.173611 * λ
+
+
+D = np.zeros((N-2, 2, 2), dtype=complex)
+# F = np.eye(2, dtype=complex)
+for j in range(N-2):
+	# D[j] = D_(k, n[j+1], hz[j])
+	# F = np.matmul(D, F)
+	# or
+	D[j] = TMM.D_trig_(k, n[j+1], hz[j])
+	
+F = reduce(np.matmul, [D[i] for i in range(N-3, -1, -1)])
+	
+r, t = TMM.find_rt(F, n)
+R = np.abs(r) ** 2
+T = n[-1] / n[0] * np.abs(t) ** 2
+print(f'R={R:.4f}')
+print(f'T={T:.4f}')
+print(f' check {R+T:.4f}')	# if = 1 => fine
+
