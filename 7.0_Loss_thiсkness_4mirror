@@ -1,0 +1,246 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import time
+
+from materials import Material, materials_dict
+from TMMatrix import TransferMatrix
+import to_excel
+
+
+# TMM - EH - time, impulse
+
+start_time = time.time()
+
+c = 299792458
+hv = 0.8 * 1.602176634e-19  # Дж
+qe = 1.602176634e-19
+me0 = 9.10938370153e-31
+e0 = 8.8541878128e-12
+
+λ = 1.55e-6
+tm = TransferMatrix(λ_=λ)
+k = tm.k
+
+I1 = 17e9  # Вт/м^2		"1"
+K = 1 / 4
+I0 = I1 * K  # "0"
+
+U = 'Ge'
+
+material = materials_dict[U]
+n_ = material.n
+a = material.a
+me = material.me
+
+print(f'{c} м/с - скорость света')
+print(f'{hv} Дж - энергия фотона')
+print(f'{qe} Кл - заряд электрона')
+print(f'{me0} кг - эффективная масса электрона')
+print(f'{e0} Ф*м-1 - электрическая постоянная')
+print(f'{λ} м - длина волны излучения лазера')
+print(f'{I1} Вт/м^2 - плотность мощности "1"')
+print(f'{I0} Вт/м^2 - плотность мощности "0"')
+
+print(f"Материал: {material.name}")
+print(f'{a} м-1 - показатель поглощения')
+print(f'{n_} - коэффициент преломления')
+print(f'{me} кг - эффективная поперечная масса электрона')
+
+print('')
+print('Система СИ')
+print('')
+print('')
+
+# ----------------------------------------------------------- Задание структуры
+
+n_si = 3.48
+n_sio2 = 1.44
+
+n = np.array([n_si, n_sio2, n_si, n_sio2, n_si, n_, n_si, n_sio2, n_si, n_sio2, n_si], dtype=np.float16)
+N_nl = 5
+
+N = len(n)  # кол-во слоёв
+hz = np.zeros(N - 2)
+
+# hz_nl = np.linspace(0.090 * λ, 0.12 * λ, 40) # ------------------- 1 нс
+hz_nl = np.linspace(0.09 * λ, 0.13 * λ, 40)  # ------------------- 10 нс
+
+loss = np.zeros_like(hz_nl)
+
+# -------------------------------- 4 layer mirror
+
+h_sio2 = 0.173611 * λ  # λ/4n
+h_si = 0.071839 * λ  # λ/4n
+h_si_ = 0.108361 * λ  # R = 0.76
+hz[0] = h_sio2
+hz[1] = h_si_
+hz[2] = h_sio2
+hz[3] = h_si
+hz[N_nl - 1] = None
+hz[5] = h_si
+hz[6] = h_sio2
+hz[7] = h_si_
+hz[8] = h_sio2
+
+
+# ----------------------------------------------------------- Импульс
+
+# ------------------ Прямоугольный импульс
+tau = 10e-9
+h_t = 200e-12
+t_i = np.arange(0, tau, h_t)
+N_t = len(t_i)
+
+I_t0 = np.full(N_t, I0, dtype=np.float64)
+I_t1 = np.full(N_t, I1, dtype=np.float64)
+S0 = tm.integral_(I_t0, h_t)
+S1 = tm.integral_(I_t1, h_t)
+
+I = I_t0
+
+
+# --------------------------------- Гаусс
+# def gauss_(tau_, t_):
+# 	gauss = np.exp(-2 * (t_ - 2 * tau_) ** 2 / tau_ ** 2)
+# 	return gauss
+#
+#
+# tau = 1e-9
+# h_t = 50e-12
+# t_i = np.arange(0, 4 * tau, h_t)
+# N_t = len(t_i)
+#
+# I_t0 = gauss_(tau, t_i) * I0
+# I_t1 = gauss_(tau, t_i) * I1
+# S0 = tm.integral_(I_t0, h_t)
+# S1 = tm.integral_(I_t1, h_t)
+#
+# I = I_t0
+
+
+for q, hz_nl_i in enumerate(hz_nl):
+	
+	hz[N_nl - 1] = hz_nl_i
+	
+	# ----------------------------------------------------------- сетка
+	
+	z_0 = 0.2 * λ
+	z_1 = np.sum(hz[:N_nl - 1])
+	z_i = np.arange(-z_0, z_1, 0.0001 * λ)  # левая половина
+	
+	z_2 = np.sum(hz[:N_nl])
+	z_3 = np.sum(hz) + z_0
+	z_j = np.arange(z_2, z_3, 0.0001 * λ)  # правая половина
+	
+	h_nl = 0.0001 * λ
+	z_nl = np.arange(z_1, z_2, h_nl)  # нелинейный слой
+	
+	edge = [np.sum(hz[:Ni]) for Ni in range(len(hz) + 1)]
+	edge = edge + [z_3]
+	
+	z_shift = [0] + edge
+	
+	# ------------------ основной цикл
+	I_tau = np.zeros(N_t, dtype=np.float64)
+	n_in = np.full(len(z_nl), n[N_nl])
+	
+	for t in range(N_t):
+		
+		F = tm.find_F_nl_(hz, n, n_in, a, h_nl, N_nl)
+		
+		r_, t_ = tm.find_rt(F, n[0], n[-1])
+		R = np.abs(r_) ** 2
+		T = n[-1] / n[0] * np.abs(t_) ** 2
+		
+		# if t % 50 == 0:
+		# 	print(f'|r|={np.abs(r_):.4f}')
+		# 	print(f'|t|={np.abs(t_):.4f}')
+		# 	print(f'R={R:.4f}')
+		# 	print(f'T={T:.4f}')
+		# 	print(f'check {R + T:.4f}')  # if a > 0 => R+T < 0
+		# 	print('')
+		
+		# ----------------------------------------------------------- через поля
+		E0 = 1 + r_
+		H0 = n[0] * (1 - r_)
+		
+		EH = np.full(N, None, dtype=object)
+		EH[0] = np.array([E0, H0])
+		EH[1] = EH[0]
+		
+		# ------------------------------ падающее + отражённое поле и левое зеркало
+		E_z_l = tm.Field_l_mirror_(n, hz, z_i, edge, z_shift, EH, 1, N_nl)
+		
+		# ------------------------------ нелинейный слой
+		E_z_nl = tm.Field_nl_(a, z_nl, n_in, N_nl, EH, h_nl)
+		
+		n_in += tm.find_dn_(E_z_nl, I[t], h_t, hv, qe, me, e0, c, k, a, n[N_nl], n[0])
+		
+		# ------------------------------ правое зеркало и прошедшее поле
+		E_z_r = tm.Field_r_mirror_(n, hz, z_j, edge, z_shift, EH, N_nl + 1, N - 1)
+		
+		# ----------------------------------------------------------- график распределения поля в момент t
+		E_z = np.concatenate([E_z_l, E_z_nl, E_z_r])
+		z_all = np.concatenate([z_i, z_nl, z_j])
+		It = np.abs(E_z) ** 2
+		I_tau[t] = n[-1] / n[0] * It[-1] * I[t]
+		
+		# if t == N_t - 1 or t == 0:
+		# 	print(t)
+		# 	print(f'I[-1]={It[t]:.4f}')  # check,	if = T => fine
+		# 	print(f'1/40 = {1 / 40:.4f}')
+		# 	print(f'1/T = {1 / T:.4f}')
+		
+		# Graph.Field_z_(z_all, It, edge, N_nl)
+		
+		if t == N_t - 1:
+			print(f"-------------------")
+			end_time = time.time()
+			time_ = end_time - start_time
+			print(f"t_time = {t}_{time_:.6f} сек")
+			print('')
+	
+	# ----------------------------------------------------------- Импульс до/после ограничения
+	
+	S = tm.integral_(I_tau, h_t)
+	
+	print('')
+	print(f"-------------------")
+	print(f'S0 = {S0:.4f}')
+	print(f'S1 = {S1:.4f}')
+	print(f'S = {S:.4f}')
+	print('')
+	
+	if np.round(np.max(I) / I1, 2) == 0.25:
+		print(q)
+		print(f'I = {np.max(I) / I1:.2f}')
+		print(f'потери для I0, % =  {(1 - S / S0) * 100:.2f}')
+	
+	if np.round(np.max(I) / I1, 2) == 1.00:
+		print(f'I = {np.max(I) / I1:.2f}')
+		print(f'огр-е I1/I0 -> {1 / 10}: S/S0 = {S / S0:.4f} ; {S0 / S:.4f} ')
+		print(f'огр-е out/in -> {1 / 40}: S/S1 = {S / S1:.4f} ; {S1 / S:.4f} ')
+	
+	# Graph.Impulse_(t_i, I, I_tau)
+	# Graph.change_n_in_(z_nl, n_in, n_)
+	
+	loss[q] = (1 - S / S0) * 100
+
+plt.figure()
+plt.plot(hz_nl * 1e6, loss, linestyle='-', marker='.', color='k', markersize=7, linewidth=1.5)
+plt.title(f'τ = {tau * 1e9:.1f} нс')
+plt.xlabel("Длина, мкм")
+plt.ylabel("Потери, %")
+plt.grid(linewidth=0.4)
+
+plt.tight_layout()
+plt.show()
+
+to_excel.out_to_xl_(
+	x_values=hz_nl * 1e6,
+	x_name="Длина, мкм",
+	y_values=loss,
+	y_name="Потери, %",
+	name_file=f"Потери {tau * 1e9:.0f}",
+	sheet_title=f"{tau * 1e9:.0f} нс"
+)
