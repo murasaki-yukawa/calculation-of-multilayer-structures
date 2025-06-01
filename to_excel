@@ -1,0 +1,38 @@
+import openpyxl
+import os
+
+
+
+def out_to_xl_(x_values, x_name, y_values, y_name, name_file, sheet_title):
+    """
+     Сохраняет данные в Excel-файл.
+
+     Параметры:
+         x_values: массив значений по оси X (np.array или list)
+         x_name: название столбца X (str)
+         y_values: массив значений по оси Y (np.array или list)
+         y_name: название столбца Y (str)
+         name_file: имя файла (str)
+         sheet_title: название листа (str)
+     """
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.title = sheet_title
+    
+    x_values = x_values.tolist()
+    y_values = y_values.tolist()
+    
+    sheet['A1'] = x_name
+    sheet['B1'] = y_name
+    
+    for i in range(len(x_values)):
+        sheet.cell(row=i + 2, column=1, value=x_values[i])
+        sheet.cell(row=i + 2, column=2, value=y_values[i])
+    
+    desktop_path = os.path.join(os.path.expanduser('~'), 'Desktop')
+    file_path = os.path.join(desktop_path, name_file + '.xlsx')
+    
+    workbook.save(file_path)
+    print(" ")
+    print(" ")
+    print(f"Файл успешно создан: {file_path}")
