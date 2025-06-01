@@ -1,0 +1,201 @@
+import numpy as np
+from functools import reduce
+import matplotlib.pyplot as plt
+
+from materials import Material, materials_dict
+import TMM
+import to_excel
+import Airy
+
+# TMM - EH - Find L for defined value R
+
+
+c = 299792458
+hv = 0.8 * 1.602176634e-19  # Дж
+qe = 1.602176634e-19
+me0 = 9.10938370153e-31
+e0 = 8.8541878128e-12
+
+λ = 1.55e-6
+k = 2 * np.pi / λ
+
+I1 = 17e9  # Вт/м^2                        "1"
+alpha = 1 / 40
+I0 = I1 * alpha  # 0.425  ГВт/м^2          "0"
+
+
+
+U = 'Ge'
+
+material = materials_dict[U]
+n_ = material.n
+a = material.a
+me = material.me
+
+
+
+print(f'{c} м/с - скорость света')
+print(f'{hv} Дж - энергия фотона')
+print(f'{qe} Кл - заряд электрона')
+print(f'{me0} кг - эффективная масса электрона')
+print(f'{e0} Ф*м-1 - электрическая постоянная')
+print(f'{λ} м - длина волны излучения лазера')
+print(f'{I1} Вт/м^2 - плотность мощности "1"')
+print(f'{I0} Вт/м^2 - плотность мощности "0"')
+
+print(U)
+print(f'{a} м-1 - показатель поглощения')
+print(f'{n_} - коэффициент преломления')
+print(f'{me} кг - эффективная масса электрона')
+
+print('')
+print('Система СИ')
+
+print('Константы: +')
+print('')
+
+
+
+# ----------------------------------------------------------------------------
+
+n_si = 3.48
+n_sio2 = 1.44
+
+# n = np.array([n_si, n_sio2, n_si, n_sio2, n_])
+
+n = np.array([n_si, n_sio2, n_si, n_sio2, n_, n_sio2, n_si, n_sio2, n_si])
+N_nl = 4
+
+# n = np.array([n_si, n_sio2, n_si, n_sio2, n_si, n_, n_si, n_sio2, n_si, n_sio2, n_si])
+# N_nl = 5
+
+N = len(n)  # кол-во слоёв
+
+
+hz = np.zeros(N-2)
+
+# --------------------------- 3 mirror
+hz[0] = 0.173611 * λ
+hz[1] = 0.116262 * λ		# R = 0.76
+# hz[1] = 0.116341 * λ		# R = 0.759
+# hz[1] = 0.128210 * λ		# R = 0.524
+hz[2] = 0.173611 * λ
+
+hz_ = np.linspace(0, 0.3 * λ, 10000)
+
+hz[4] = 0.173611 * λ
+hz[5] = 0.116262 * λ		# R = 0.76
+# hz[5] = 0.116341 * λ		# R = 0.759
+# hz[5] = 0.128210 * λ		# R = 0.524
+hz[6] = 0.173611 * λ
+
+# --------------------------- 4 mirror
+# hz[0] = 0.173611 * λ
+# # hz[1] = 0.107061 * λ		# R = 0.77
+# hz[1] = 0.108361 * λ		# R = 0.76
+# hz[2] = 0.173611 * λ
+# hz[3] = 0.071839 * λ
+#
+# hz_ = np.linspace(0, 0.3 * λ, 10000)
+#
+# hz[5] = 0.071839 * λ
+# hz[6] = 0.173611 * λ
+# # hz[7] = 0.107061 * λ		# R = 0.77
+# hz[7] = 0.108361 * λ		# R = 0.76
+# hz[8] = 0.173611 * λ
+
+
+R = np.zeros_like(hz_)
+T = np.zeros_like(hz_)
+
+
+for i, length in enumerate(hz_):
+	
+	D = np.zeros((N-2, 2, 2), dtype=complex)
+
+	for j in range(N-2):
+		if j == N_nl-1:
+			D[j] = TMM.D_trig_absorb_(k, a, n[j+1], hz_[i])
+			# D[j] = D_trig_(k, n[j+1], hz[j])
+		else:
+			D[j] = TMM.D_trig_(k, n[j+1], hz[j])
+
+	F = reduce(np.matmul, [D[i] for i in range(N-3, -1, -1)])
+	
+	r, t = TMM.find_rt(F, n)
+	R[i] = np.abs(r) ** 2
+	T[i] = n[-1] / n[0] * np.abs(t) ** 2
+
+
+target_T = np.max(T)
+idx = np.argmin(np.abs(T - target_T))
+hz_at_target = hz_[idx]
+T_value = T[idx]
+
+print(f"T_max = {T_value:.6f}")
+print(f"hz_nl / λ = {hz_at_target / λ:.6f}")
+print(f"hz_nl = {hz_at_target:.6e} мкм")
+
+target_T = np.min(T[:idx])
+# target_T = np.min(T[idx:(4 * idx)])
+idx = np.argmin(np.abs(T - target_T))
+hz_at_target = hz_[idx]
+T_value = T[idx]
+
+print(f"T_min = {T_value:.6f}")
+print(f"hz_ / λ = {hz_at_target / λ:.6f}")
+print(f"hz_ = {hz_at_target:.6e} мкм")
+
+# --------------------------- 3 mirror
+# T_max = 0.800957
+# hz_ / λ = 0.103630
+# T_min = 0.018742
+# hz_ / λ = 0.044884
+
+# --------------------------- 4 mirror
+# T_max = 0.792208
+# hz_ / λ = 0.103390
+# T_min = 0.016840
+# hz_ / λ = 0.044614
+
+# --------------------------- Fabry-Perot
+R_fp = 0.9
+T_fp = Airy.I_out_absorb_(R_fp, k * n_ * hz_, a, hz_)
+
+
+plt.figure()
+# plt.plot(hz_/λ, T, label="с учётом зеркал")
+plt.plot(hz_/λ, T_fp, label="без учёта зеркал")
+# plt.axvline(1/(4 * n_), color='r', linestyle='--', label=f"λ/4n")
+# plt.axvline(1/(2 * n_), color='g', linestyle='--', label=f"λ/2n")
+# plt.axvline(0.1176, color='k', linestyle='--')
+# plt.axvline(0.102610, color='r', linestyle='--')
+
+# plt.xlim(0, 1)
+plt.ylim(0, 1)
+plt.xlabel("длина, λ")
+plt.ylabel("Пропускание")
+plt.legend()
+plt.grid()
+
+plt.tight_layout()
+plt.show()
+
+
+# to_excel.out_to_xl_(
+#     x_values=hz_/λ,
+#     x_name="Длина, λ",
+#     y_values=T,
+#     y_name="Пропускание",
+#     name_file=f"Пропускание 3m ",
+#     sheet_title=f"3mirror"
+# )
+#
+# to_excel.out_to_xl_(
+#     x_values=hz_/λ,
+#     x_name="Длина, λ",
+#     y_values=T_fp,
+#     y_name="Пропускание",
+#     name_file=f"Пропускание fp {R_fp} ",
+#     sheet_title=f"fp {R_fp}"
+# )
