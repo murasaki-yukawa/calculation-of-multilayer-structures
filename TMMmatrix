@@ -1,0 +1,242 @@
+import numpy as np
+from functools import reduce
+
+
+
+class TransferMatrix:
+	def __init__(self, λ_):
+		"""
+		Инициализация с длиной волны (м) или волновым числом k (м^-1)
+		"""
+		self.λ = λ_
+		self.k = 2 * np.pi / λ_
+	
+	
+	@staticmethod
+	def P_(k, n, L):
+		"""Матрица распространения для слоя"""
+		P_n1_L = np.zeros((2, 2), dtype=np.complex128)
+		P_n1_L[0, 0] = np.exp(1j * k * n * L)
+		P_n1_L[1, 1] = np.exp(-1j * k * n * L)
+		return P_n1_L
+	
+	@staticmethod
+	def S_(n):
+		"""Матрица перехода между слоями"""
+		S_n = np.ones((2, 2))
+		# S_n[0, 0] = 1
+		# S_n[0, 1] = 1
+		S_n[1, 0] = n
+		S_n[1, 1] = -n
+		return S_n
+	
+	@staticmethod
+	def S_inv_(n):
+		"""Обратная матрица перехода"""
+		S_inv_n = np.empty((2, 2))
+		S_inv_n[0, 0] = n
+		S_inv_n[0, 1] = 1
+		S_inv_n[1, 0] = n
+		S_inv_n[1, 1] = -1
+		S_inv_n /= 2 * n
+		return S_inv_n
+	
+	
+	def D_(self, n, L):
+		"""Матрица одного слоя (общий вид)"""
+		return self.S_(n) @ self.P_(self.k, n, L) @ self.S_inv(n)
+	
+	
+	def D_trig_(self, n, L):
+		"""Матрица слоя через тригонометрические функции"""
+		D_n = np.empty((2, 2), dtype=np.complex128)
+		D_n[0, 0] = np.cos(self.k * n * L)
+		D_n[0, 1] = 1j * np.sin(self.k * n * L) / n
+		D_n[1, 0] = 1j * np.sin(self.k * n * L) * n
+		D_n[1, 1] = np.cos(self.k * n * L)
+		return D_n
+	
+	
+	def D_trig_absorb_(self, a, n, L):
+		"""Матрица слоя с поглощением"""
+		D_n = np.empty((2, 2), dtype=np.complex128)
+		D_n[0, 0] = np.cos(self.k * n * L + 1j * a / 2 * L)
+		D_n[0, 1] = 1j * np.sin(self.k * n * L + 1j * a / 2 * L) / n
+		D_n[1, 0] = 1j * np.sin(self.k * n * L + 1j * a / 2 * L) * n
+		D_n[1, 1] = np.cos(self.k * n * L + 1j * a / 2 * L)
+		return D_n
+	
+	
+	@staticmethod
+	def find_rt(F, n_0, n_N):
+		"""
+		Вычисление коэффициентов отражения и пропускания
+		F - полная матрица переноса
+		n_0 - показатель преломления первого слоя
+		n_N - показатель преломления последнего слоя
+		"""
+		denominator = (n_N * F[0, 0] - n_0 * n_N * F[0, 1] - F[1, 0] + n_0 * F[1, 1])
+		
+		r = (-n_N * F[0, 0] - n_0 * n_N * F[0, 1] + F[1, 0] + n_0 * F[1, 1]) / denominator
+		t = 2 * n_0 / denominator
+		
+		return r, t
+	
+	
+	@staticmethod
+	def find_dn_(E, I0, dt, hv, qe, me, e0, c, k0, a, n, n0):
+		"""Вычисление нелинейного изменения показателя преломления"""
+		I = I0 * n / n0 * np.abs(E) ** 2
+		N = a * I * dt / hv
+		wp2 = (qe ** 2) * N / (me * e0)
+		w2 = (k0 * c) ** 2
+		dn = - wp2 / (2 * n0 * w2)
+		return dn
+	
+	
+	@staticmethod
+	def integral_(y, dx):
+		"""Численное интегрирование методом трапеций"""
+		return np.sum((y[:-1] + y[1:]) / 2 * dx)
+	
+	
+	def find_F_(self, hz, n, a, N_nl):
+		"""Расчёт полной матрицы распространения для структуры"""
+		N = len(n)
+		
+		if N != len(hz) + 2:
+			raise ValueError("Длины массивов hz и n должны совпадать")
+		
+		if N_nl is not None:
+			if N_nl < 0 or N_nl >= N:
+				raise ValueError(f"Недопустимый индекс нелинейного слоя: {N_nl}")
+			
+			# -----------------------------------------------
+			D = np.zeros((N-2, 2, 2), dtype=np.complex128)
+			
+			for j in range(N-2):
+				if j == N_nl - 1:
+					if a is None:
+						D[j] = self.D_trig_(n[j+1], hz[j])
+					else:
+						D[j] = self.D_trig_absorb_(a, n[j+1], hz[j])
+				else:
+					D[j] = self.D_trig_(n[j+1], hz[j])
+					
+			F = reduce(np.matmul, [D[i] for i in range(N-3, -1, -1)])
+			return F
+		
+		elif N_nl is None:	raise	ValueError(f"Индекс нелинейного слоя: {N_nl}")
+
+	
+	def find_F_nl_(self, hz, n, n_in, a, h_nl, N_nl):
+		"""Расчёт полной матрицы распространения для структуры"""
+		N = len(n)
+		
+		if N != len(hz) + 2:
+			raise ValueError("Длины массивов hz и n должны совпадать")
+
+		if N_nl is not None:
+			if N_nl < 0 or N_nl >= N:
+				raise ValueError(f"Недопустимый индекс нелинейного слоя: {N_nl}")
+			
+			# -----------------------------------------------
+			D = np.zeros((N-2, 2, 2), dtype=np.complex128)
+			
+			if n_in is not None and h_nl is not None:
+				Q = len(n_in)
+				D_nl = np.zeros((Q, 2, 2), dtype=np.complex128)
+	
+				for j in range(N-2):
+					if j == N_nl-1:
+						for i in range(Q):
+							if a is None:
+								D_nl[i] = self.D_trig_(n_in[i], h_nl)
+							else:
+								D_nl[i] = self.D_trig_absorb_(a, n_in[i], h_nl)
+					else:
+						D[j] = self.D_trig_(n[j+1], hz[j])
+				
+				D[N_nl-1] = reduce(np.matmul, [D_nl[i] for i in range(Q-1, -1, -1)])
+				
+			elif n_in is None and h_nl is None:	raise ValueError(f"n_in, h_nl = None")
+			
+			F = reduce(np.matmul, [D[i] for i in range(N-3, -1, -1)])
+			return F
+		
+		elif N_nl is None:	raise	ValueError(f"Индекс нелинейного слоя: {N_nl}")
+	
+	
+	@staticmethod
+	def check_F_(F, r, n):
+		E0 = 1 + r
+		H0 = n[0] * (1 - r)
+		
+		EH1 = F @ [E0, H0]
+		E1 = EH1[0]
+		
+		E1_abs = np.abs(E1)
+		print('')
+		print('ПРОВЕРКА')
+		print('')
+		# print(f'E1={E1:.4f}')
+		print(f'|E1|={E1_abs:.4f}')
+		print(f'|E1|^2={n[-1] / n[0] * E1_abs ** 2:.4f}')
+		print('')
+	
+	
+	def Field_l_mirror_(self, n, hz, z_, edge, z_shift, EH, start, end):
+		E_z_l = np.zeros_like(z_, dtype=np.complex128)
+		
+		for i in range(start, end):
+			EH[i + 1] = self.D_trig_(n[i], hz[i - 1]) @ EH[i]
+		
+		for i, z in enumerate(z_):
+			for j in range(end):
+				if z <= edge[j]:
+					E_z_l[i] = (self.D_trig_(n[j], z - z_shift[j]) @ EH[j])[0]
+					break
+		return E_z_l
+	
+	
+	def Field_nl_(self, a, z_nl, n_in, N_nl, EH, h_nl):
+		E_z_nl = np.zeros_like(z_nl, dtype=np.complex128)
+		Q = len(z_nl)
+		
+		EH_nl = np.zeros((Q+1, 2), dtype=complex)
+		EH_nl[0] = EH[N_nl]
+		
+		for i, z in enumerate(z_nl):
+			if a is None:
+				EH_nl[i+1] = self.D_trig_(n_in[i], h_nl) @ EH_nl[i]  # без поглощения
+			else:
+				EH_nl[i+1] = self.D_trig_absorb_(a, n_in[i], h_nl) @ EH_nl[i]
+			E_z_nl[i] = EH_nl[i][0]
+		
+		EH[N_nl+1] = EH_nl[-1]
+		
+		return E_z_nl
+	
+	
+	def Field_r_mirror_(self, n, hz, z_, edge, z_shift, EH, start, end):
+		E_z_r = np.zeros_like(z_, dtype=np.complex128)
+		
+		for i in range(start, end):
+			EH[i + 1] = self.D_trig_(n[i], hz[i - 1]) @ EH[i]
+		
+		for i, z in enumerate(z_):
+			for j in range(end + 1):
+				if z <= edge[j]:
+					E_z_r[i] = (self.D_trig_(n[j], z - z_shift[j]) @ EH[j])[0]
+					break
+		return E_z_r
+	
+	
+		
+		
+		
+		
+		
+		
+		
+		
