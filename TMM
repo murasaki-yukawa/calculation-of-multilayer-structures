@@ -1,0 +1,196 @@
+import numpy as np
+from functools import reduce
+
+
+def P_(k, n1, L1):
+	"""Матрица распространения для слоя"""
+	P_n1_L = np.zeros((2, 2), dtype=np.complex128)
+	P_n1_L[0, 0] = np.exp(1j * k * n1 * L1)
+	P_n1_L[1, 1] = np.exp(-1j * k * n1 * L1)
+	return P_n1_L
+
+
+def S_(n):
+	S_n = np.ones((2, 2))
+	# S_n[0, 0] = 1
+	# S_n[0, 1] = 1
+	S_n[1, 0] = n
+	S_n[1, 1] = -n
+	return S_n
+
+
+def S_inv_(n):
+	S_inv_n = np.empty((2, 2))
+	S_inv_n[0, 0] = n
+	S_inv_n[0, 1] = 1
+	S_inv_n[1, 0] = n
+	S_inv_n[1, 1] = -1
+	S_inv_n /= 2 * n
+	return S_inv_n
+
+
+def M_(n1, n2):
+	"""Матрица перехода между слоями"""
+	M = np.empty((2, 2))
+	M[0, 0] = n1 + n2
+	M[0, 1] = n2 - n1
+	M[1, 0] = n2 - n1
+	M[1, 1] = n1 + n2
+	M /= 2 * n2
+	return M
+
+
+# or
+def M_s_(n1, n2):
+	"""Обратная матрица перехода"""
+	return np.matmul(S_inv_(n2), S_(n1))  # S_inv_(n2) @ S_(n1)
+
+
+def D_(k, n, L):
+	"""Матрица одного слоя (общий вид)"""
+	return np.matmul(np.matmul(S_(n), P_(k, n, L)), S_inv_(n))  # S_(n) @ P_(k, n, L) @ S_inv_(n)
+# or
+def D_trig_(k, n, L):
+	"""Матрица слоя через тригонометрические функции"""
+	D_n = np.empty((2, 2), dtype=np.complex128)
+	D_n[0, 0] = np.cos(k * n * L)
+	D_n[0, 1] = 1j * np.sin(k * n * L) / n
+	D_n[1, 0] = 1j * np.sin(k * n * L) * n
+	D_n[1, 1] = np.cos(k * n * L)
+	return D_n
+
+
+def D_trig_absorb_(k, a, n, L):
+	"""Матрица слоя с поглощением"""
+	D_n = np.empty((2, 2), dtype=np.complex128)
+	D_n[0, 0] = np.cos(k * n * L + 1j * a / 2 * L)
+	D_n[0, 1] = 1j * np.sin(k * n * L + 1j * a / 2 * L) / n
+	D_n[1, 0] = 1j * np.sin(k * n * L + 1j * a / 2 * L) * n
+	D_n[1, 1] = np.cos(k * n * L + 1j * a / 2 * L)
+	return D_n
+
+
+def find_L(λ, n):	return λ / (4 * n)
+
+
+def find_rt(F, n):
+	"""
+	Вычисление коэффициентов отражения и пропускания
+	F - полная матрица переноса
+	"""
+	denominator = n[-1] * F[0, 0] - n[0] * n[-1] * F[0, 1] - F[1, 0] + n[0] * F[1, 1]
+	r = (-n[-1] * F[0, 0] - n[-1] * n[0] * F[0, 1] + F[1, 0] + n[0] * F[1, 1]) / denominator
+	t = 2 * n[0] / denominator
+	
+	return r, t
+
+
+def find_dn_(E, I0, t_h, hv, qe, me, e0, c, k, a, n, n0):
+	"""Вычисление нелинейного изменения показателя преломления"""
+	Ii = I0 * n / n0 * np.abs(E) ** 2
+	N_ = a * Ii * t_h / hv
+	
+	wp2 = (qe ** 2) * N_ / (me * e0)
+	w2 = (k * c) ** 2
+	
+	dn = - wp2 / (2 * n0 * w2)
+	
+	return dn
+
+
+def integral_(y, dx):
+	"""Численное интегрирование методом трапеций"""
+	S = 0
+	for i in range(len(y) - 1):
+		S += (y[i] + y[i + 1]) / 2 * dx
+	return S
+
+
+def find_F_(hz, k, n, a, N_nl):
+	N = len(n)
+
+	if N != len(hz) + 2:
+		raise ValueError("Длины массивов hz и n должны совпадать")
+	
+	if N_nl is not None:
+		if N_nl < 0 or N_nl >= N:
+			raise ValueError(f"Недопустимый индекс нелинейного слоя: {N_nl}")
+	
+		D = np.zeros((N-2, 2, 2), dtype=np.complex128)
+		
+		for j in range(N-2):
+			if j == N_nl - 1:
+				if a is None:
+					D[j] = D_trig_(k, n[j+1], hz[j])	# без поглощения
+				else:
+					D[j] = D_trig_absorb_(k, a, n[j+1], hz[j])
+			else:
+				D[j] = D_trig_(k, n[j+1], hz[j])
+		
+		F = reduce(np.matmul, [D[i] for i in range(N-3, -1, -1)])
+		return F
+	
+	elif N_nl is None:	raise ValueError(f"Индекс нелинейного слоя: {N_nl}")
+	
+def check_F_(F, r, n):
+	E0 = 1 + r
+	H0 = n[0] * (1 - r)
+	
+	EH1 = F @ [E0, H0]
+	E1 = EH1[0]
+	
+	E1_abs = np.abs(E1)
+	print('')
+	print('ПРОВЕРКА')
+	print('')
+	# print(f'E1={E1:.4f}')
+	print(f'|E1|={E1_abs:.4f}')
+	print(f'|E1|^2={n[-1] / n[0] * E1_abs ** 2:.4f}')
+	print('')
+	
+
+def Field_l_mirror_(k, n, hz, z_, edge, z_shift, EH, start, end):
+	E_z_l = np.zeros_like(z_, dtype=np.complex128)
+	
+	for i in range(start, end):
+		EH[i+1] = D_trig_(k, n[i], hz[i-1]) @ EH[i]
+	
+	for i, z in enumerate(z_):
+		for j in range(end):
+			if z <= edge[j]:
+				E_z_l[i] = (D_trig_(k, n[j], z - z_shift[j]) @ EH[j])[0]
+				break
+	return E_z_l
+
+
+def Field_nl_(k, n, a, z_nl, N_nl, EH, h_nl):
+	E_z_nl = np.zeros_like(z_nl, dtype=np.complex128)
+	n_in = np.full(len(z_nl), n[N_nl], dtype=object)
+	
+	EH_nl = np.zeros((len(n_in) + 1, 2), dtype=complex)
+	EH_nl[0] = EH[N_nl]
+	
+	for i, z in enumerate(z_nl):
+		if a is None:
+			EH_nl[i + 1] = D_trig_(k, n_in[i], h_nl) @ EH_nl[i]	# без поглощения
+		else:
+			EH_nl[i+1] = D_trig_absorb_(k, a, n_in[i], h_nl) @ EH_nl[i]
+		E_z_nl[i] = EH_nl[i][0]
+	
+	EH[N_nl + 1] = EH_nl[-1]
+	
+	return E_z_nl
+	
+
+def Field_r_mirror_(k, n, hz, z_, edge, z_shift, EH, start, end):
+	E_z_r = np.zeros_like(z_, dtype=np.complex128)
+	
+	for i in range(start, end):
+		EH[i + 1] = D_trig_(k, n[i], hz[i - 1]) @ EH[i]
+	
+	for i, z in enumerate(z_):
+		for j in range(end + 1):
+			if z <= edge[j]:
+				E_z_r[i] = (D_trig_(k, n[j], z - z_shift[j]) @ EH[j])[0]
+				break
+	return E_z_r
